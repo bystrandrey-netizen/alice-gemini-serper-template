@@ -159,7 +159,14 @@ async function searchWeb(query, timeoutMs) {
       );
     }
 
-    return items.length ? items.join("\n") : "";
+    if (items.length) {
+  console.log("SERPER_SEARCH_SUCCESS", {
+    query: query.slice(0, 100),
+    results: items.length
+  });
+}
+
+return items.length ? items.join("\n") : "";
   } catch (error) {
     console.warn(
       "Serper request did not finish in time; continuing without search."
