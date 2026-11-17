@@ -3,6 +3,7 @@ const DEFAULT_MODEL = "gemini-3.5-flash-lite";
 const MAX_HISTORY_MESSAGES = 8;
 const MAX_HISTORY_MESSAGE_CHARS = 1200;
 const MAX_ALICE_TEXT = 1024;
+
 const TOTAL_RESPONSE_BUDGET_MS = 4200;
 const SERPER_TIMEOUT_MS = 1500;
 const GEMINI_TIMEOUT_MS = 2500;
@@ -14,7 +15,7 @@ const SYSTEM_PROMPT = [
     month: "long",
     day: "numeric"
   })}. Это текущая дата, используй её при ответах.`,
-  "Тебя зовут Патрик. Ты персональный голосовой ИИ-помощник.",
+
   "Тебя зовут Патрик. Ты персональный голосовой ИИ-помощник.",
   "Общайся естественно, дружелюбно и уверенно, как умный собеседник.",
   "Отвечай на русском языке, если пользователь не попросил другой язык.",
@@ -167,13 +168,12 @@ async function searchWeb(query, timeoutMs) {
     }
 
     if (items.length) {
-  console.log("SERPER_SEARCH_SUCCESS", {
-    query: query.slice(0, 100),
-    results: items.length
-  });
-}
+      console.log("SERPER_SEARCH_SUCCESS", {
+        results: items.length
+      });
+    }
 
-return items.length ? items.join("\n") : "";
+    return items.length ? items.join("\n") : "";
   } catch (error) {
     console.warn(
       "Serper request did not finish in time; continuing without search."
@@ -285,23 +285,23 @@ async function askGemini(text, history, searchContext, timeoutMs) {
 function errorForUser(error) {
   switch (error?.message) {
     case "MISSING_GEMINI_KEY":
-      return "Сервер пока не настроен. Проверьте переменную GEMINI_API_KEY в настройках Vercel.";
+      return "Сервер пока не настроен. Проверь переменную GEMINI_API_KEY в настройках Vercel.";
 
     case "GEMINI_KEY_REJECTED":
-      return "Не удалось подключиться к Gemini. Проверьте API-ключ в настройках Vercel.";
+      return "Не удалось подключиться к Gemini. Проверь API-ключ в настройках Vercel.";
 
     case "GEMINI_QUOTA":
-      return "Сейчас превышен лимит запросов к Gemini. Попробуйте немного позже.";
+      return "Сейчас превышен лимит запросов к Gemini. Попробуй немного позже.";
 
     case "GEMINI_BLOCKED":
-      return "Я не смог обработать этот запрос. Попробуйте спросить иначе.";
+      return "Я не смог обработать этот запрос. Попробуй спросить иначе.";
 
     case "TIME_BUDGET_EXHAUSTED":
     case "AbortError":
-      return "Не успел подготовить ответ. Попробуйте задать вопрос ещё раз, чуть короче.";
+      return "Не успел подготовить ответ. Попробуй задать вопрос ещё раз, чуть короче.";
 
     default:
-      return "Не получилось получить ответ от нейросети. Попробуйте ещё раз чуть позже.";
+      return "Не получилось получить ответ от нейросети. Попробуй ещё раз чуть позже.";
   }
 }
 
@@ -310,7 +310,7 @@ export default async function handler(req, res) {
     return res.status(200).json({
       ok: true,
       service: "alice-gemini-serper",
-      message: "Webhook is ready. Yandex Dialogs should send POST requests to /api."
+      message: "Webhook is ready. Yandex Dialogs should send POST requests to /api/index."
     });
   }
 
@@ -355,15 +355,26 @@ export default async function handler(req, res) {
   try {
     let searchContext = "";
 
-    if (
-      isSearchIntent(text) &&
-      process.env.SERPER_API_KEY
-    ) {
+    const needsSearch = isSearchIntent(text);
+
+    if (needsSearch && process.env.SERPER_API_KEY) {
       searchContext = await searchWeb(
         text,
         Math.min(
           SERPER_TIMEOUT_MS,
           Math.max(0, remainingMs() - 2600)
+        )
+      );
+    }
+
+    // Если требуется актуальная информация, но поиск не сработал,
+    // не позволяем Gemini придумывать новости по памяти.
+    if (needsSearch && process.env.SERPER_API_KEY && !searchContext) {
+      return res.status(200).json(
+        aliceResponse(
+          "Не удалось получить свежие данные из интернета. Попробуй повторить вопрос.",
+          false,
+          oldHistory
         )
       );
     }
@@ -398,7 +409,7 @@ export default async function handler(req, res) {
     );
   } catch (error) {
     const safeError =
-      error?.message === "AbortError"
+      error?.name === "AbortError"
         ? new Error("TIME_BUDGET_EXHAUSTED")
         : error;
 
